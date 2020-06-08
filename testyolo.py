@@ -58,14 +58,17 @@ def activate(name):
 # map hwcs -> conv
 # here the "hwcs" respersent the paramters of this function
 # temporarily use sigmoid function to calculate the activation value
+# the shape and value of the paramters in any layer  will be determined when called for the first time
 def conv(h, w, c, stride=1, padding="SAME",activateFunc=activate("leaky")):
     """
     h w c means the size of the filter
     this is not equal to the concept of "triple" mentioned later
     """
-
+    f=None
     def run(tensor):
-        f = getFileters(h, w, channel(tensor), c)
+        nonlocal f
+        if f is None:
+            f = getFileters(h, w, channel(tensor), c)
         x = tf.nn.conv2d(input=tensor, filter=f, strides=[1, stride, stride, 1], padding="SAME")
         x = activateFunc(x)
         return x
