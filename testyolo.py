@@ -48,10 +48,12 @@ actstb={
     "tanh":tf.tanh,
     "cos":tf.cos,
     "softplus":tf.nn.softplus,
-    "leaky":tf.nn.leaky_relu
+    "leaky":tf.nn.leaky_relu,
+    "linear":lambda x:x
 }
 def activate(name):
-    assert name in actstb
+    assert name in actstb,f"activation function is not supported now," \
+                          f"you can use the following activation functions:{actstb.keys()}"
     return actstb[name]
 # %%
 ## mapping functions series starts here
@@ -65,16 +67,41 @@ def conv(h, w, c, stride=1, padding="SAME",activateFunc=activate("leaky")):
     this is not equal to the concept of "triple" mentioned later
     """
     f=None
+    norm=batchnorm()
     def run(tensor):
         nonlocal f
         if f is None:
             f = getFileters(h, w, channel(tensor), c)
         x = tf.nn.conv2d(input=tensor, filter=f, strides=[1, stride, stride, 1], padding="SAME")
         x = activateFunc(x)
+        # use batch normalization function
+        x=norm(x)
         return x
 
     return run
 
+def batchnorm():
+    """
+    create a batchnorm layer
+    :return: a function represent a batchnorm layer
+    """
+    scale=None
+    shift=None
+    epsilon = 0.001
+    def run(tensor):
+        nonlocal  scale
+        nonlocal  shift
+        nonlocal  epsilon
+        mean, vars = tf.nn.moments(x, axes=[0])
+        # size will determined by  the shape of sample  such as (416,416,3)
+        # and then the shape of the scale and shift would be (1,416,416,3)
+        # which represented
+        if scale is None:
+            size = tensor[0].shape
+            scale = tf.Variable(tf.ones([size]))
+            shift = tf.Variable(tf.zeros([size]))
+        return tf.nn.batch_normalization(tensor,mean,vars,shift,scale,epsilon)
+    return run
 
 # %%
 # map [hwcs]->[conv]
@@ -240,6 +267,8 @@ def yolo_headLayer():
     def run(tensor):
         with tf.name_scope("headLayer"):
             # keep size unchanged,channel change to 32
+            # record the input data on head
+            tf.summary.image("inputImages",tensor)
             layer=conv(3,3,c=32)
             return layer(tensor)
     return run
@@ -248,14 +277,30 @@ def yolo_outputLayer():
     def run(tensor):
         # 1 1 1 255
         with tf.name_scope("outputLayer"):
-            layer=conv(1,1,255)
+            layer=conv(1,1,255,activateFunc=activate("linear"))
+            # the activation function will calculate in yolo_loss layer with loss
             return layer(tensor)
+    return run
+
+def yolo_loss():
+    def run(output,label):
+        # will record the loss value by tf.summary.scalar there
+        # there will be calculations for the loss and the activation value of output
+        pass
     return run
 # %%
 sess = tf.Session()
 
 # %%
-testtensor = tf.constant(np.ones((5, 416, 416, 3)), dtype="float32")
+from matplotlib import  pyplot as plt
+img=plt.imread("壁纸.jpg")#type:np.ndarray
+img=img.astype("float32")/255
+
+
+testtensor =tf.constant(img,dtype="float32")
+testtensor=tf.expand_dims(testtensor,axis=0)
+print(testtensor.shape)
+testtensor=tf.image.resize_images(testtensor,(416,416))
 # %%
 lst = get_ShapePretected_Paramters(2, outputShape=testtensor.shape.as_list())
 
@@ -406,24 +451,17 @@ sess.run(initop)
 print(x)
 sess.run(x)
 
+summray=sess.run(tf.summary.merge_all())
 
-# from matplotlib import  pyplot as plt
-# img=plt.imread("壁纸.jpg")#type:np.ndarray
-# img=img.astype("float32")/255
-#
-#
-# timg=sess.run(max_unpool_2x2(tf.constant([img.tolist()],dtype="float32")))
-#
-# print(img.shape,timg[0].shape)
-# plt.subplot(121).imshow(img)
-# plt.subplot(122).imshow(timg[0])
-# plt.show()
+
+
 # %%
 # here is the tensorboard section
 from tensorflow.summary import FileWriter
 
 writer = FileWriter("./logs", sess.graph)
-
+writer.add_summary(summary=summray)
+writer.close()
 import os
 try:
     oracle_vars = dict((a, b) for a, b in os.environ.items() if a.find('IPYTHONENABLE') >= 0)
